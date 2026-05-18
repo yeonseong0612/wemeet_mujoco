@@ -1,0 +1,57 @@
+<mujoco model="basic_scene">
+  <compiler angle="degree"/>
+
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <worldbody>
+    <!-- 조명 -->
+    <light name="main_light" pos="0 0 3" dir="0 0 -1"/>
+
+    <!-- 바닥 -->
+    <geom 
+      name="floor"
+      type="plane"
+      pos="0 0 0"
+      size="5 5 0.1"
+      rgba="0.8 0.8 0.8 1"
+    />
+
+    <!-- 박스 -->
+    <body name="box_body" pos="-0.7 0 0.25">
+      <geom 
+        name="box"
+        type="box"
+        size="0.25 0.25 0.25"
+        rgba="1 0 0 1"
+      />
+    </body>
+
+    <!-- 구 -->
+    <body name="sphere_body" pos="0 0 0.25">
+      <geom 
+        name="sphere"
+        type="sphere"
+        size="0.25"
+        rgba="0 1 0 1"
+      />
+    </body>
+
+    <!-- 원기둥 -->
+    <body name="cylinder_body" pos="0.7 0 0.25">
+      <geom 
+        name="cylinder"
+        type="cylinder"
+        size="0.2 0.5"
+        rgba="0 0 1 1"
+      />
+    </body>
+
+    <!-- 카메라 -->
+    <camera 
+      name="main_camera"
+      pos="0 -3 1.5"
+      euler="65 0 0"
+      fovy="45"
+    />
+  </worldbody>
+</mujoco>
