@@ -4,6 +4,9 @@
     <option timestep="0.002" gravity="0 0 -9.81"/>
 
     <include file="robots/ur10e/ur10e.xml"/>
+    <asset>
+        <mesh name="charge_port_mesh" file="Port.obj" scale="0.001 0.001 0.001"/>
+    </asset>
     <visual>
         <headlight
             ambient="0.3 0.3 0.3"
@@ -13,6 +16,36 @@
     </visual>
 
     <worldbody>
+        <body name="charge_port" pos="1.0 0.0 0.5" euler="0 -90 0">
+            <geom name="charge_port_visual"
+                type="mesh"
+                mesh="charge_port_mesh"
+                contype="0"
+                conaffinity="0"
+                rgba="0.2 0.2 0.2 1"/>
+
+            <site name="charge_port_center"
+                pos="0 0 0"
+                size="0.025"
+                rgba="0 1 0 1"/>
+
+            <site name="charge_port_axis_site"
+                pos="0 0 -0.10"
+                size="0.02"
+                rgba="1 0 0 1"/>
+
+            <site name="charge_port_approach"
+                pos="0 0 0.15"
+                euler="180 0 0"
+                size="0.025"
+                rgba="1 0.6 0 1"/>
+
+            <site name="charge_port_insert"
+                pos="0 0 -0.02"
+                euler="180 0 0"
+                size="0.02"
+                rgba="0 0 1 1"/>
+        </body>
         <light
             name="main_light"
             pos="0 0 3"
@@ -29,12 +62,6 @@
             rgba="0.8 0.8 0.8 1"
         />
 
-        <site
-            name="ik_target"
-            pos="0.2 0.6 0.8"
-            size="0.04"
-            rgba="1 0 0 1"
-        />
 
         <camera
             name="overview_camera"
