@@ -15,6 +15,16 @@ if PROJECT_ROOT not in sys.path:
 from src.ik import get_joint_ids, solve_pose_ik
 
 
+# ============================================================
+# Rotation test mode
+# ============================================================
+# 0: XML site rotation 그대로 사용
+# 1: target rotation에 local X축 기준 180도 추가
+# 2: target rotation에 local Y축 기준 180도 추가
+# 3: target rotation에 localZ축 기준 180도 추가
+ROTATION_MODE = 1
+
+
 def get_project_root():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
@@ -63,6 +73,110 @@ def print_model_info(model):
         print(i, name)
 
 
+def rot_x_180():
+    return np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, -1.0],
+    ])
+
+
+def rot_y_180():
+    return np.array([
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, -1.0],
+    ])
+
+
+def rot_z_180():
+    return np.array([
+        [-1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+
+
+def apply_rotation_debug_mode(target_rot):
+    """
+    XML에서 가져온 target_rot을 테스트용으로 보정한다.
+
+    ROTATION_MODE:
+        0: no change
+        1: local X 180 deg
+        2: local Y 180 deg
+        3: local Z 180 deg
+    """
+    if ROTATION_MODE == 0:
+        print("[Rotation mode] use XML site rotation")
+        return target_rot
+
+    if ROTATION_MODE == 1:
+        print("[Rotation mode] target_rot @ RotX(180)")
+        return target_rot @ rot_x_180()
+
+    if ROTATION_MODE == 2:
+        print("[Rotation mode] target_rot @ RotY(180)")
+        return target_rot @ rot_y_180()
+
+    if ROTATION_MODE == 3:
+        print("[Rotation mode] target_rot @ RotZ(180)")
+        return target_rot @ rot_z_180()
+
+    raise ValueError(f"Invalid ROTATION_MODE: {ROTATION_MODE}")
+
+
+def get_charge_port_axis(model, data):
+    """
+    charge_port_center -> charge_port_axis_site 방향을 충전구 삽입 방향으로 정의한다.
+    """
+    center_id = model.site("charge_port_center").id
+    axis_id = model.site("charge_port_axis_site").id
+
+    center = data.site_xpos[center_id].copy()
+    axis_point = data.site_xpos[axis_id].copy()
+
+    axis = axis_point - center
+    axis_norm = np.linalg.norm(axis)
+
+    if axis_norm < 1e-9:
+        raise RuntimeError("charge_port_axis_site is too close to charge_port_center.")
+
+    axis = axis / axis_norm
+
+    return center, axis_point, axis
+
+
+def print_axis_alignment(model, data, ee_site_id, label):
+    """
+    현재 EE site의 local 축들과 charge_port_axis의 dot product를 출력한다.
+    dot product가 1에 가까운 축이 충전구 삽입 방향과 같은 방향이다.
+    """
+    mujoco.mj_forward(model, data)
+
+    port_center, port_axis_point, port_axis = get_charge_port_axis(model, data)
+
+    ee_pos = data.site_xpos[ee_site_id].copy()
+    ee_rot = data.site_xmat[ee_site_id].reshape(3, 3).copy()
+
+    ee_x = ee_rot[:, 0]
+    ee_y = ee_rot[:, 1]
+    ee_z = ee_rot[:, 2]
+
+    print(f"\n==== Axis Alignment Check: {label} ====")
+    print("port_center    :", port_center)
+    print("port_axis_point:", port_axis_point)
+    print("port_axis      :", port_axis)
+    print("ee_pos         :", ee_pos)
+
+    print("EE +X dot port_axis:", np.dot(ee_x, port_axis))
+    print("EE -X dot port_axis:", np.dot(-ee_x, port_axis))
+    print("EE +Y dot port_axis:", np.dot(ee_y, port_axis))
+    print("EE -Y dot port_axis:", np.dot(-ee_y, port_axis))
+    print("EE +Z dot port_axis:", np.dot(ee_z, port_axis))
+    print("EE -Z dot port_axis:", np.dot(-ee_z, port_axis))
+
+
 def solve_ik_to_pose(
     model,
     data,
@@ -98,6 +212,9 @@ def solve_ik_to_pose(
     print("Final EE pos:", final_pos)
     print("Final pos error:", final_pos_error)
     print("Final rot error:", final_rot_error)
+    print_matrix("Final EE rot:", final_rot)
+
+    print_axis_alignment(model, data, ee_site_id, label)
 
     return q_target
 
@@ -147,8 +264,11 @@ def main():
     reset_model(model, data)
 
     _, ee_start_pos, ee_start_rot = get_site_pose(model, data, ee_site_name)
-    _, approach_pos, approach_rot = get_site_pose(model, data, approach_site_name)
-    _, insert_pos, insert_rot = get_site_pose(model, data, insert_site_name)
+    _, approach_pos, approach_rot_xml = get_site_pose(model, data, approach_site_name)
+    _, insert_pos, insert_rot_xml = get_site_pose(model, data, insert_site_name)
+
+    approach_rot = apply_rotation_debug_mode(approach_rot_xml)
+    insert_rot = apply_rotation_debug_mode(insert_rot_xml)
 
     print("\n==== Initial Info ====")
     print("EE site name       :", ee_site_name)
@@ -161,11 +281,15 @@ def main():
     print("Distance approach -> insert:", np.linalg.norm(insert_pos - approach_pos))
 
     print_matrix("\nStart EE rot:", ee_start_rot)
-    print_matrix("\nApproach rot:", approach_rot)
-    print_matrix("\nInsert rot:", insert_rot)
+    print_matrix("\nApproach rot XML:", approach_rot_xml)
+    print_matrix("\nApproach rot used:", approach_rot)
+    print_matrix("\nInsert rot XML:", insert_rot_xml)
+    print_matrix("\nInsert rot used:", insert_rot)
+
+    print_axis_alignment(model, data, ee_site_id, "initial")
 
     # ------------------------------------------------------------
-    # 2. 1차 목표: 충전구 위쪽 approach pose로 이동
+    # 2. 1차 목표: charge_port_approach pose로 이동
     # ------------------------------------------------------------
     q_approach = solve_ik_to_pose(
         model=model,
@@ -180,15 +304,17 @@ def main():
     )
 
     # ------------------------------------------------------------
-    # 3. 2차 목표: approach -> insert 방향으로 수직 삽입
-    #    여기서는 직선 삽입을 위해 Cartesian waypoint를 여러 개 만든다.
-    #    자세는 approach_rot을 유지한다.
+    # 3. 2차 목표: approach -> insert 방향으로 삽입
     # ------------------------------------------------------------
     num_insert_waypoints = 20
     q_insert_waypoints = []
 
     print("\n==== Build Insertion Waypoints ====")
 
+    # 중요:
+    # 여기서는 position은 approach -> insert로 보간하고,
+    # rotation은 approach_rot을 계속 유지한다.
+    # 즉, 같은 자세로 충전구 축 방향을 따라 삽입한다.
     for idx, alpha in enumerate(np.linspace(1.0 / num_insert_waypoints, 1.0, num_insert_waypoints)):
         waypoint_pos = interpolate_q(approach_pos, insert_pos, alpha)
 
@@ -219,7 +345,8 @@ def main():
         print("\nViewer started.")
         print("Charging sequence:")
         print("  Phase 1: move to charge_port_approach")
-        print("  Phase 2: move downward to charge_port_insert")
+        print("  Phase 2: move to charge_port_insert")
+        print(f"  ROTATION_MODE = {ROTATION_MODE}")
 
         reset_model(model, data)
 

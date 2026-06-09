@@ -1,0 +1,4 @@
+models/assets/**/*.obj
+models/assets/**/*.mtl
+models/robots/**/*.obj
+models/robots/**/*.mtl
