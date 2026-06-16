@@ -1,9 +1,16 @@
 <mujoco model="wemeet_scene">
-    <compiler angle="degree"/>
+    <!-- radian으로 통일: include된 ur10e.xml(angle=radian, joint range ±2π)이 전역에 적용되므로
+         scene.xml의 euler 값도 radian으로 작성한다. (degree로 두면 포트/카메라가 radian으로 오해석됨) -->
+    <compiler angle="radian"/>
 
     <option timestep="0.002" gravity="0 0 -9.81"/>
 
     <include file="robots/ur10e/ur10e.xml"/>
+
+    <asset>
+        <!-- Port.obj is modelled in millimetres → scale to metres -->
+        <mesh name="charge_port_mesh" file="Port.obj" scale="0.001 0.001 0.001"/>
+    </asset>
 
     <visual>
         <headlight
@@ -29,10 +36,67 @@
             size="5 5 0.1"
             rgba="0.5 0 0.8 1"/>
 
+        <!-- Charging-port target (FoundationPose 6DoF estimation 대상) -->
+        <!-- 로봇 앞(+Y) 0.8 m. 실제 소켓 결합면(2구멍 커넥터)은 mesh object +Z 쪽(Port.obj 실제 확인).
+             quat=(0.7071,0.7071,0,0) = 90° about world X: 소켓면 object +Z -> world -Y(로봇쪽),
+             AC 상단 object +Y -> world +Z(위) = 로봇이 정면에서 결합하는 장착 자세 -->
+        <body name="charge_port_frame" pos="0 0.8 0.6" quat="0.70710678 0.70710678 0 0">
+
+
+            <geom name="charge_port_visual"
+                  type="mesh"
+                  mesh="charge_port_mesh"
+                  pos="0 0 0"
+                  euler="0 0 0"
+                  contype="0"
+                  conaffinity="0"
+                  rgba="0.2 0.2 0.2 1"/>
+
+            <!-- 소켓 입구(커넥터 돌출부 앞면) 중심. object +Z 쪽 (Port.obj 실제: 커넥터 Z≈+0.115) -->
+            <site name="charge_port_center"
+                  pos="0 -0.02 0.115"
+                  size="0.025"
+                  rgba="0 1 0 1"/>
+            <!-- 삽입축 기준점: 소켓 안쪽(-Z) 0.10 m -->
+            <site name="charge_port_axis_site"
+                  pos="0 -0.02 0.015"
+                  size="0.02"
+                  rgba="1 0 0 1"/>
+            <!-- 접근: 소켓 바깥(+Z) 0.15 m (로봇쪽) -->
+            <site name="charge_port_approach"
+                  pos="0 -0.02 0.265"
+                  size="0.025"
+                  rgba="1 0.6 0 1"/>
+            <!-- 삽입: 소켓 안쪽(-Z) 0.02 m (착좌) -->
+            <site name="charge_port_insert"
+                  pos="0 -0.02 0.095"
+                  size="0.02"
+                  rgba="0 0 1 1"/>
+        </body>
+
         <camera
             name="overview_camera"
             pos="2 -3 2"
-            euler="60 0 35"
+            euler="1.0472 0 0.6109"
+            fovy="45"/>  <!-- 60 0 35 deg ->
+
+        <!-- Dedicated RGB-D camera facing the port head-on (FoundationPose 입력용) -->
+        <camera
+            name="cam_port"
+            pos="0 -0.2 0.6"
+            xyaxes="1 0 0  0 0 1"
             fovy="45"/>
+
+        <!-- Stereo camera pair: baseline 0.12 m along world-X, parallel optical axes -->
+        <camera
+            name="stereo_left"
+            pos="-0.06 -1.5 1.2"
+            euler="0.8901 0 0"
+            fovy="45"/>  <!-- 51 deg -->
+        <camera
+            name="stereo_right"
+            pos="0.06 -1.5 1.2"
+            euler="0.8901 0 0"
+            fovy="45"/>  <!-- 51 deg -->
     </worldbody>
 </mujoco>

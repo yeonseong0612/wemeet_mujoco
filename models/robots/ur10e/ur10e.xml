@@ -135,17 +135,20 @@
                       contype="0"
                       conaffinity="0"
                       group="2"/>
-                    <!-- 충전건 끝점: 나중에 충전구 중심과 맞출 기준 -->
+                    <!-- 충전건 커넥터 결합면 중심 (EE.obj Ymax 캡, 메시 분석으로 산출, custom_ee 프레임).
+                         커넥터 면 법선 = custom_ee +Y. xyaxes: 로컬 +X = 결합/삽입 forward(+Y), +Z = up.
+                         → IK pose 타겟이 커넥터 축을 충전구 삽입축에 정렬한다. -->
                     <site
                       name="charger_tip_site"
-                      pos="0.25 0 0"
+                      pos="0 0.2041 0.012"
+                      xyaxes="0.0085 0.9999 0.0079  -1 0.0085 0"
                       size="0.02"
                       rgba="0 1 0 1"
                       group="4"/>
-                    <!-- 충전건 삽입 방향 기준 -->
+                    <!-- 삽입축 방향 표시: tip 에서 커넥터 forward 로 +0.10 m -->
                     <site
                       name="charger_axis_site"
-                      pos="0.35 0 0"
+                      pos="0.0008 0.3041 0.0128"
                       size="0.015"
                       rgba="0 0 1 1"
                       group="4"/>
@@ -170,6 +173,6 @@
   </actuator>
 
   <keyframe>
-    <key name="home" qpos="-1.5708 -1.5708 1.5708 -1.5708 -1.5708 0" ctrl="-1.5708 -1.5708 1.5708 -1.5708 -1.5708 0"/>
+    <key name="home" qpos="-1.5708 -1.9 2.0 -1.6 -1.5708 0" ctrl="-1.5708 -1.9 2.0 -1.6 -1.5708 0"/>
   </keyframe>
 </mujoco>

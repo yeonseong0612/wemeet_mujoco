@@ -2,3 +2,23 @@ models/assets/**/*.obj
 models/assets/**/*.mtl
 models/robots/**/*.obj
 models/robots/**/*.mtl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# MuJoCo runtime log
+MUJOCO_LOG.TXT
+
+# External dependencies (large binaries / weights)
+ext/
+checkpoints/
+
+# Output artifacts
+outputs/
+
+# OS / WSL2
+.DS_Store
+*:Zone.Identifier
+pip

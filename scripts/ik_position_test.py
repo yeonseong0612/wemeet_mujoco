@@ -12,17 +12,18 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from src.ik import get_joint_ids, solve_pose_ik
+from src.ik import get_joint_ids, solve_position_ik, solve_pose_ik
 
 
 # ============================================================
 # Rotation test mode
 # ============================================================
 # 0: XML site rotation 그대로 사용
-# 1: target rotation에 local X축 기준 180도 추가
+# 1: target rotation에 local X축 기준 180도 추가 (attachment_site 용)
 # 2: target rotation에 local Y축 기준 180도 추가
-# 3: target rotation에 localZ축 기준 180도 추가
-ROTATION_MODE = 1
+# 3: target rotation에 local Z축 기준 180도 추가
+# 4: target rotation에 R_TIP_IN_OBJ 적용 (charger_tip_site, 총신축 정렬)
+ROTATION_MODE = 4
 
 
 def get_project_root():
@@ -97,15 +98,27 @@ def rot_z_180():
     ])
 
 
+def rot_tip_in_obj():
+    # charger_tip_site 삽입 자세 (port 프레임 기준):
+    #   tip +X(총신 forward) → port -Z(소켓 안으로),  tip +Z(총구 up) → port +Y(위)
+    # 소켓면은 object +Z(로봇쪽), 삽입 방향은 port -Z.
+    return np.array([
+        [0.0, -1.0, 0.0],
+        [0.0,  0.0, 1.0],
+        [-1.0, 0.0, 0.0],
+    ])
+
+
 def apply_rotation_debug_mode(target_rot):
     """
     XML에서 가져온 target_rot을 테스트용으로 보정한다.
 
     ROTATION_MODE:
         0: no change
-        1: local X 180 deg
+        1: local X 180 deg  (attachment_site 용)
         2: local Y 180 deg
         3: local Z 180 deg
+        4: local Y -90 deg  (charger_tip_site 용, R_TIP_IN_OBJ)
     """
     if ROTATION_MODE == 0:
         print("[Rotation mode] use XML site rotation")
@@ -122,6 +135,10 @@ def apply_rotation_debug_mode(target_rot):
     if ROTATION_MODE == 3:
         print("[Rotation mode] target_rot @ RotZ(180)")
         return target_rot @ rot_z_180()
+
+    if ROTATION_MODE == 4:
+        print("[Rotation mode] target_rot @ R_TIP_IN_OBJ  [charger_tip_site]")
+        return target_rot @ rot_tip_in_obj()
 
     raise ValueError(f"Invalid ROTATION_MODE: {ROTATION_MODE}")
 
@@ -192,6 +209,20 @@ def solve_ik_to_pose(
     print("Target pos:", target_pos)
     print_matrix("Target rot:", target_rot)
 
+    # Phase 1: 위치만 먼저 수렴 (large rotation 시 local minimum 방지)
+    solve_position_ik(
+        model=model,
+        data=data,
+        ee_site_id=ee_site_id,
+        target_pos=target_pos,
+        joint_ids=joint_ids,
+        max_iters=400,
+        step_size=step_size,
+        damping=1e-4,
+        verbose=False,
+    )
+
+    # Phase 2: 위치+자세 동시 수렴
     q_target, final_pos, final_rot, final_pos_error, final_rot_error = solve_pose_ik(
         model=model,
         data=data,
@@ -204,7 +235,7 @@ def solve_ik_to_pose(
         rot_tol=1e-3,
         step_size=step_size,
         damping=1e-4,
-        rot_weight=0.5,
+        rot_weight=1.5,
         verbose=True,
     )
 
@@ -235,7 +266,7 @@ def main():
 
     print_model_info(model)
 
-    ee_site_name = "attachment_site"
+    ee_site_name = "charger_tip_site"
     approach_site_name = "charge_port_approach"
     insert_site_name = "charge_port_insert"
 
