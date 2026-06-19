@@ -152,6 +152,15 @@
                       size="0.015"
                       rgba="0 0 1 1"
                       group="4"/>
+                    <!-- Eye-in-Hand RGB-D 카메라 (Intel RealSense D435 기준, fovy=42.5°, 848x480 @ 렌더 시).
+                         총신(+Y) 위쪽(+Z 0.11)에 장착, 전방 +Y 를 ~16° 하향으로 내려다본다.
+                         MuJoCo 카메라는 -Z 시선/+Y up: euler X=1.30 → 시선 [0, sin, -cos] = +Y & 하향.
+                         standoff ~0.33 m (approach pose 기준 포트 중심). pos/euler 는 EiH-3 렌더 검증 후 미세조정. -->
+                    <camera
+                      name="cam_eih"
+                      pos="0 0.04 0.11"
+                      euler="1.30 0 0"
+                      fovy="42.5"/>
                   </body>
 
                 </body>

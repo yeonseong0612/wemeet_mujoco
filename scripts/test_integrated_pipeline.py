@@ -44,8 +44,9 @@ PNG_OUT    = os.path.join(OUTPUT_DIR, "integrated_eval.png")
 CAM_NAME   = "cam_port"
 PORT_GEOM  = "charge_port_visual"
 PORT_BODY  = "charge_port_frame"
-EE_SITE    = "charger_tip_site"      # IK 대상 = 충전건 tip (custom_ee +X 방향 0.25m)
+EE_SITE    = "charger_tip_site"      # IK 대상 = 충전건 tip (custom_ee 프레임 +Y 0.204m 돌출)
 TARGET_SITES = ["charge_port_approach", "charge_port_insert"]
+OBS_SITE   = "charge_port_approach"  # eye-in-hand 관찰 pose: tip 을 여기 두고 카메라로 포트 관측
 
 # object(port) 프레임 기준 charger_tip_site 목표 자세.
 #   tip +X(총신 forward) → port -Z(소켓 안으로 삽입),  tip +Z(총구 up) → port +Y(위)
@@ -57,7 +58,9 @@ JOINT_NAMES = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
                "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
 
 MESH_SCALE = 0.001
-IMG_W, IMG_H = 640, 480
+IMG_W, IMG_H = 640, 480                 # 기본(cam_port) 렌더 해상도
+# 카메라별 렌더 해상도. cam_eih 는 Intel RealSense D435 네이티브(848x480).
+CAM_RES = {"cam_port": (640, 480), "cam_eih": (848, 480)}
 EST_REFINE_ITER = 5
 
 # 랜덤화: 로봇 앞 도달가능 영역 (검증된 nominal (0,0.8,0.6) 주변)
@@ -83,12 +86,36 @@ def intrinsics_from_fovy(model, cam_id, w, h):
     return np.array([[fy, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
 
 
-def cam_in_world_cv(model, data, cam_id):
-    """OpenCV 규약 카메라의 world pose (4x4). MuJoCo cam → CV(y,z 반전)."""
+def pos_mat_to_T(pos, mat):
+    """(pos(3,), mat(3,3)) → 4x4 동차변환 (CLAUDE.md §2 규약)."""
     T = np.eye(4)
-    T[:3, :3] = data.cam_xmat[cam_id].reshape(3, 3)
-    T[:3, 3] = data.cam_xpos[cam_id]
-    return T @ np.diag([1.0, -1.0, -1.0, 1.0])
+    T[:3, :3] = np.asarray(mat).reshape(3, 3)
+    T[:3, 3] = np.asarray(pos)
+    return T
+
+
+def cam_in_world_cv(model, data, cam_id):
+    """카메라의 world pose (OpenCV 규약, 4x4) — 고정값이 아니라 호출 시점에 동적 계산.
+
+    CLAUDE.md §2 의 eye-in-hand 규약대로, 캐시/상수 대신 매 호출마다
+    data.cam_xpos / data.cam_xmat 을 읽어 카메라 pose 를 구한다. 따라서 카메라가
+    EE 에 장착돼 로봇과 함께 움직이는 cam_eih 에서도, 외부 고정 cam_port 에서도
+    동일 코드로 올바른 값을 돌려준다(cam_port 는 결과적으로 매번 같은 값).
+
+        cam_pos = data.cam_xpos[cam_id]            # world frame
+        cam_mat = data.cam_xmat[cam_id]            # world frame
+        cam_in_world = pos_mat_to_T(cam_pos, cam_mat)
+
+    ⚠️ cam_xpos/xmat 은 직전 mj_forward 의 qpos 로 산출된다. eye-in-hand 의 경우
+       반드시 "영상을 캡처한 그 로봇 자세"에서(즉 IK 로 팔을 움직이기 전에) 호출해
+       렌더 이미지와 카메라 pose 가 같은 상태를 가리키도록 해야 한다.
+       여기서 IK 타겟은 world 프레임이므로 반환값(cam_in_world)이 곧 변환식의
+       cam_in_base 역할을 한다(robot base 원점=world 원점).
+
+    MuJoCo 카메라(-Z 시선,+Y up) → OpenCV(+Z 시선,-Y down) 변환은 diag(1,-1,-1).
+    """
+    cam_in_world = pos_mat_to_T(data.cam_xpos[cam_id], data.cam_xmat[cam_id])
+    return cam_in_world @ np.diag([1.0, -1.0, -1.0, 1.0])
 
 
 def gt_object_in_cam(model, data, cam_id, body_id):
@@ -170,6 +197,41 @@ def reset_robot(model, data):
     mujoco.mj_forward(model, data)
 
 
+def set_observation_pose(model, data, ids):
+    """charger_tip_site 를 OBS_SITE(charge_port_approach)에 삽입축 자세로 정렬 (2단계 IK).
+
+    eye-in-hand 카메라(cam_eih)가 충전구를 정면으로 관측하도록 팔을 관찰 pose 에 둔다.
+    (scripts/test_eih_view.py 의 set_observation_pose 와 동일 로직.)
+    """
+    R_world_obj = data.xmat[ids["body"]].reshape(3, 3)
+    target_pos = data.site_xpos[ids["obs"]].copy()
+    target_rot = R_world_obj @ R_TIP_IN_OBJ
+
+    reset_robot(model, data)
+    solve_position_ik(model, data, ids["ee"], target_pos,
+                      ids["joints"], max_iters=400, verbose=False)
+    q, _, _, pe, re = solve_pose_ik(
+        model, data, ids["ee"], target_pos, target_rot,
+        ids["joints"], max_iters=500, step_size=0.3, damping=1e-4,
+        rot_weight=1.5, verbose=False)
+    qpos_ids = [model.jnt_qposadr[j] for j in ids["joints"]]
+    data.qpos[qpos_ids] = q
+    mujoco.mj_forward(model, data)
+    return pe, re
+
+
+def position_for_capture(model, data, ids):
+    """영상 캡처 직전 로봇 자세 설정.
+
+    - eye-in-hand(cam_eih): 관찰 pose 로 이동(카메라가 포트를 보도록).
+    - 외부 고정(cam_port): home 유지(팔이 포트를 가리지 않도록).
+    """
+    if ids["eye_in_hand"]:
+        return set_observation_pose(model, data, ids)
+    reset_robot(model, data)
+    return None, None
+
+
 def sample_reachable_pose(model, data, renderer, ids, rng):
     """로봇 앞 도달가능 + 포트 가시성 조건을 만족하는 (pos, quat) 샘플."""
     for _ in range(MAX_SAMPLE_TRIES):
@@ -182,7 +244,8 @@ def sample_reachable_pose(model, data, renderer, ids, rng):
 
         set_port_pose(model, data, ids["body"], pos, quat)
 
-        # 가시성
+        # 가시성: 실제 캡처와 동일한 로봇 자세(eye-in-hand=관찰 pose / 고정=home)에서 판정
+        position_for_capture(model, data, ids)
         _, _, mask = render_rgbd_mask(renderer, model, data, ids["cam"], ids["geom"])
         if int(mask.sum()) < MIN_MASK_PX:
             continue
@@ -229,6 +292,11 @@ def build_estimator():
 # ---------------------------------------------------------------------------
 def evaluate_pose(model, data, renderer, ids, est, K, site_offsets):
     """현재 포트 포즈에서 GT vs FP 비교 + IK 착지오차 측정. dict 반환."""
+    # 렌더 직전 로봇을 캡처 자세로 배치(eye-in-hand=관찰 pose / 고정=home).
+    # 영상 캡처와 카메라 pose 획득을 같은 로봇 자세에서 수행한다(eye-in-hand 정합 필수).
+    # Twc_cv 는 이 시점의 data.cam_xpos/xmat 로 동적 계산되므로, 이후 IK 로 팔이
+    # 움직여도(아래 루프) 캡처 당시 카메라 pose 스냅샷으로 유지된다.
+    position_for_capture(model, data, ids)
     rgb, depth, mask = render_rgbd_mask(renderer, model, data, ids["cam"], ids["geom"])
     Twc_cv = cam_in_world_cv(model, data, ids["cam"])
 
@@ -357,6 +425,8 @@ def run_gui(model, data, ids, est, K, site_offsets, renderer, pose):
 
     pos, quat = pose
     set_port_pose(model, data, ids["body"], pos, quat)
+    # 렌더 직전 캡처 자세 배치 후, 그 자세에서 카메라 pose 를 동적 스냅샷 (eye-in-hand 정합).
+    position_for_capture(model, data, ids)
     rgb, depth, mask = render_rgbd_mask(renderer, model, data, ids["cam"], ids["geom"])
     Twc_cv = cam_in_world_cv(model, data, ids["cam"])
     fp_ob = est.register(K=K.astype(np.float64), rgb=rgb,
@@ -410,17 +480,23 @@ def main():
     ap.add_argument("--n", type=int, default=10, help="평가 포즈 수")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-gui", action="store_true", help="GUI 생략")
+    ap.add_argument("--camera", default=CAM_NAME, choices=["cam_port", "cam_eih"],
+                    help="입력 카메라 (기본 cam_port=외부고정 / cam_eih=eye-in-hand)")
     args = ap.parse_args()
 
     rng = np.random.default_rng(args.seed)
     cwd0 = os.getcwd()
 
+    img_w, img_h = CAM_RES.get(args.camera, (IMG_W, IMG_H))
     model = mujoco.MjModel.from_xml_path(XML_PATH)
+    # offscreen framebuffer 를 렌더 해상도에 맞게 키운다 (scene.xml 수정 없이 in-memory).
+    model.vis.global_.offwidth = max(model.vis.global_.offwidth, img_w)
+    model.vis.global_.offheight = max(model.vis.global_.offheight, img_h)
     data = mujoco.MjData(model)
-    renderer = mujoco.Renderer(model, height=IMG_H, width=IMG_W)
+    renderer = mujoco.Renderer(model, height=img_h, width=img_w)
 
     ids = {
-        "cam": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, CAM_NAME),
+        "cam": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, args.camera),
         "geom": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, PORT_GEOM),
         "body": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, PORT_BODY),
         "ee": model.site(EE_SITE).id,
@@ -428,8 +504,13 @@ def main():
         "targets": {s: model.site(s).id for s in TARGET_SITES},
     }
     ids["insert"] = ids["targets"]["charge_port_insert"]
+    ids["obs"] = model.site(OBS_SITE).id
+    # eye-in-hand 여부: 카메라가 worldbody(고정) 가 아니라 로봇 body 에 장착됐는지로 판정.
+    ids["eye_in_hand"] = bool(model.cam_bodyid[ids["cam"]] != 0)
     site_offsets = {s: target_in_obj(model, ids["targets"][s]) for s in TARGET_SITES}
-    K = intrinsics_from_fovy(model, ids["cam"], IMG_W, IMG_H)
+    K = intrinsics_from_fovy(model, ids["cam"], img_w, img_h)
+    print(f"[INFO] camera={args.camera}  eye_in_hand={ids['eye_in_hand']}  "
+          f"fovy={model.cam_fovy[ids['cam']]}  res={img_w}x{img_h}")
 
     # 1) 도달가능 포즈 N개 사전 샘플 (FP 빌드 전, MuJoCo만 사용)
     print(f"[INFO] 도달가능 포즈 {args.n}개 샘플링 ...")
@@ -452,14 +533,21 @@ def main():
 
     agg = aggregate(records)
     result = {"config": {"n": args.n, "seed": args.seed,
+                         "camera": args.camera, "eye_in_hand": ids["eye_in_hand"],
+                         "img_w": img_w, "img_h": img_h,
                          "pos_lo": POS_LO.tolist(), "pos_hi": POS_HI.tolist(),
                          "max_tilt_deg": MAX_TILT_DEG, "refine_iter": EST_REFINE_ITER},
               "aggregate": agg, "per_pose": records}
 
     os.chdir(cwd0)
-    with open(JSON_OUT, "w") as f:
+    # cam_port 는 기존 canonical 파일명 유지, 그 외 카메라는 접미사로 분리(베이스라인 보존).
+    json_out = JSON_OUT if args.camera == "cam_port" else \
+        JSON_OUT.replace(".json", f"_{args.camera}.json")
+    png_out = PNG_OUT if args.camera == "cam_port" else \
+        PNG_OUT.replace(".png", f"_{args.camera}.png")
+    with open(json_out, "w") as f:
         json.dump(result, f, indent=2)
-    save_png(records, agg, PNG_OUT)
+    save_png(records, agg, png_out)
 
     print("\n===== Aggregate (mean / max / std) =====")
     print(f"  ob_in_cam trans : {agg['obj_trans_err_mm']['mean']:.2f} / "
@@ -468,7 +556,7 @@ def main():
           f"{agg['obj_rot_err_deg']['max']:.3f} / {agg['obj_rot_err_deg']['std']:.3f} deg")
     print(f"  insert landing  : {agg['charge_port_insert_landing_pos_err_mm']['mean']:.2f} / "
           f"{agg['charge_port_insert_landing_pos_err_mm']['max']:.2f} mm")
-    print(f"\n[INFO] 저장: {JSON_OUT}\n[INFO] 저장: {PNG_OUT}")
+    print(f"\n[INFO] 저장: {json_out}\n[INFO] 저장: {png_out}")
 
     # 4) GUI 한 케이스 (랜덤 도달가능 포즈)
     if not args.no_gui:
