@@ -74,6 +74,26 @@ MAX_SAMPLE_TRIES = 400
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 from src.ik import get_joint_ids, solve_position_ik, solve_pose_ik
+from src.depth_noise import (NOISE_PRESETS, apply_depth_holes,
+                             gaussian_depth_noise, quantize_depth)
+
+
+def apply_noise_pipeline(depth, seg_mask, preset):
+    """depth 에 D435 노이즈 프리셋(none/low/medium/high)을 주입 (CLAUDE.md §5).
+
+    연결 순서: apply_depth_holes → gaussian_depth_noise → quantize_depth.
+    'none' 또는 비활성 항목은 건너뛴다. 입력은 변형하지 않고 새 배열을 반환.
+    seg_mask = 충전구 geom 픽셀 mask (hole 주입 영역).
+    """
+    cfg = NOISE_PRESETS[preset]
+    out = depth.astype(np.float32, copy=True)
+    if cfg["hole_rate"] > 0:
+        out = apply_depth_holes(out, seg_mask, hole_rate=cfg["hole_rate"])
+    if cfg["depth_gaussian_scale"] > 0:
+        out = gaussian_depth_noise(out, scale=cfg["depth_gaussian_scale"])
+    if cfg["quantize"]:
+        out = quantize_depth(out)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -302,8 +322,10 @@ def evaluate_pose(model, data, renderer, ids, est, K, site_offsets):
 
     gt_ob = gt_object_in_cam(model, data, ids["cam"], ids["body"])
 
+    # GT depth → seg_mask 기반 노이즈 주입 → noisy depth 를 FP 입력으로 사용 (GT pose 평가는 무관).
+    depth_in = apply_noise_pipeline(depth, mask, ids["noise"])
     fp_ob = est.register(K=K.astype(np.float64), rgb=rgb,
-                         depth=depth.astype(np.float32), ob_mask=mask.astype(bool),
+                         depth=depth_in.astype(np.float32), ob_mask=mask.astype(bool),
                          iteration=EST_REFINE_ITER)
 
     rec = {
@@ -429,8 +451,9 @@ def run_gui(model, data, ids, est, K, site_offsets, renderer, pose):
     position_for_capture(model, data, ids)
     rgb, depth, mask = render_rgbd_mask(renderer, model, data, ids["cam"], ids["geom"])
     Twc_cv = cam_in_world_cv(model, data, ids["cam"])
+    depth_in = apply_noise_pipeline(depth, mask, ids["noise"])
     fp_ob = est.register(K=K.astype(np.float64), rgb=rgb,
-                         depth=depth.astype(np.float32), ob_mask=mask.astype(bool),
+                         depth=depth_in.astype(np.float32), ob_mask=mask.astype(bool),
                          iteration=EST_REFINE_ITER)
 
     # FP 추정 → approach / insert world 타겟 → IK (2단계: 위치 우선 → 자세)
@@ -482,9 +505,14 @@ def main():
     ap.add_argument("--no-gui", action="store_true", help="GUI 생략")
     ap.add_argument("--camera", default=CAM_NAME, choices=["cam_port", "cam_eih"],
                     help="입력 카메라 (기본 cam_port=외부고정 / cam_eih=eye-in-hand)")
+    ap.add_argument("--noise", default="none", choices=list(NOISE_PRESETS),
+                    help="depth 노이즈 프리셋 (CLAUDE.md §5: none/low/medium/high)")
+    ap.add_argument("--out", default=None,
+                    help="결과 JSON 출력 경로 (PNG는 같은 stem .png). 미지정 시 camera/noise 기반 자동 이름")
     args = ap.parse_args()
 
     rng = np.random.default_rng(args.seed)
+    np.random.seed(args.seed)            # depth_noise 의 np.random 재현성 확보
     cwd0 = os.getcwd()
 
     img_w, img_h = CAM_RES.get(args.camera, (IMG_W, IMG_H))
@@ -505,12 +533,13 @@ def main():
     }
     ids["insert"] = ids["targets"]["charge_port_insert"]
     ids["obs"] = model.site(OBS_SITE).id
+    ids["noise"] = args.noise
     # eye-in-hand 여부: 카메라가 worldbody(고정) 가 아니라 로봇 body 에 장착됐는지로 판정.
     ids["eye_in_hand"] = bool(model.cam_bodyid[ids["cam"]] != 0)
     site_offsets = {s: target_in_obj(model, ids["targets"][s]) for s in TARGET_SITES}
     K = intrinsics_from_fovy(model, ids["cam"], img_w, img_h)
     print(f"[INFO] camera={args.camera}  eye_in_hand={ids['eye_in_hand']}  "
-          f"fovy={model.cam_fovy[ids['cam']]}  res={img_w}x{img_h}")
+          f"fovy={model.cam_fovy[ids['cam']]}  res={img_w}x{img_h}  noise={args.noise}")
 
     # 1) 도달가능 포즈 N개 사전 샘플 (FP 빌드 전, MuJoCo만 사용)
     print(f"[INFO] 도달가능 포즈 {args.n}개 샘플링 ...")
@@ -534,17 +563,27 @@ def main():
     agg = aggregate(records)
     result = {"config": {"n": args.n, "seed": args.seed,
                          "camera": args.camera, "eye_in_hand": ids["eye_in_hand"],
+                         "noise": args.noise, "noise_cfg": NOISE_PRESETS[args.noise],
                          "img_w": img_w, "img_h": img_h,
                          "pos_lo": POS_LO.tolist(), "pos_hi": POS_HI.tolist(),
                          "max_tilt_deg": MAX_TILT_DEG, "refine_iter": EST_REFINE_ITER},
               "aggregate": agg, "per_pose": records}
 
     os.chdir(cwd0)
-    # cam_port 는 기존 canonical 파일명 유지, 그 외 카메라는 접미사로 분리(베이스라인 보존).
-    json_out = JSON_OUT if args.camera == "cam_port" else \
-        JSON_OUT.replace(".json", f"_{args.camera}.json")
-    png_out = PNG_OUT if args.camera == "cam_port" else \
-        PNG_OUT.replace(".png", f"_{args.camera}.png")
+    if args.out:
+        json_out = args.out
+        png_out = os.path.splitext(args.out)[0] + ".png"
+    else:
+        # cam_port + noise=none 은 canonical 파일명 유지(베이스라인 보존), 그 외는 접미사로 분리.
+        tag = []
+        if args.camera != "cam_port":
+            tag.append(args.camera)
+        if args.noise != "none":
+            tag.append(args.noise)
+        suffix = ("_" + "_".join(tag)) if tag else ""
+        json_out = JSON_OUT.replace(".json", f"{suffix}.json")
+        png_out = PNG_OUT.replace(".png", f"{suffix}.png")
+    os.makedirs(os.path.dirname(json_out) or ".", exist_ok=True)
     with open(json_out, "w") as f:
         json.dump(result, f, indent=2)
     save_png(records, agg, png_out)

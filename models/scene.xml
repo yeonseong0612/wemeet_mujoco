@@ -52,26 +52,27 @@
                   conaffinity="0"
                   rgba="0.2 0.2 0.2 1"/>
 
-            <!-- 소켓 입구(커넥터 돌출부 앞면) 중심. Port.obj 실측: 결합면 Z≈0 (mesh AABB Z [-0.115, +0.0087]) -->
+            <!-- 소켓 입구(커넥터 돌출부 앞면) 중심. Port.obj 실측: 결합면 Z≈0 (mesh AABB Z [-0.115, +0.0087]).
+                 alpha=0: 렌더 시 숨김(IK/타겟은 site pos 사용, 무관) -->
             <site name="charge_port_center"
                   pos="0 -0.02 0"
                   size="0.025"
-                  rgba="0 1 0 1"/>
-            <!-- 삽입축 기준점: 소켓 안쪽(-Z) 0.10 m -->
+                  rgba="0 1 0 0"/>
+            <!-- 삽입축 기준점: 소켓 안쪽(-Z) 0.10 m. alpha=0: 렌더 시 숨김 -->
             <site name="charge_port_axis_site"
                   pos="0 -0.02 -0.10"
                   size="0.02"
-                  rgba="1 0 0 1"/>
-            <!-- 접근: 소켓 바깥(+Z) 0.15 m (로봇쪽) -->
+                  rgba="1 0 0 0"/>
+            <!-- 접근: 소켓 바깥(+Z) 0.15 m (로봇쪽). alpha=0: 렌더 시 숨김(IK/타겟은 site pos 사용, 무관) -->
             <site name="charge_port_approach"
                   pos="0 -0.02 0.15"
                   size="0.025"
-                  rgba="1 0.6 0 1"/>
-            <!-- 삽입: 소켓 안쪽(-Z) 0.02 m (착좌) -->
+                  rgba="1 0.6 0 0"/>
+            <!-- 삽입: 소켓 안쪽(-Z) 0.02 m (착좌). alpha=0: 렌더 시 숨김 -->
             <site name="charge_port_insert"
                   pos="0 -0.02 -0.02"
                   size="0.02"
-                  rgba="0 0 1 1"/>
+                  rgba="0 0 1 0"/>
         </body>
 
         <camera
