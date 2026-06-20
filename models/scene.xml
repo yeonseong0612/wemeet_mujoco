@@ -52,6 +52,22 @@
                   conaffinity="0"
                   rgba="0.2 0.2 0.2 1"/>
 
+            <!-- [Col-2] 소켓 입구 테두리 collision — 8개 cylinder 기둥 고리(crown)로 근사.
+                 입구평면(Port local X-Y, z=0)의 반지름 0.028m 원주에 45°씩 균등 배치.
+                 중심 charge_port_center=(0,-0.02,0) → y=-0.02+0.028·sinθ, x=0.028·cosθ.
+                 입구 안쪽 반지름 = 28-7 = 21mm, peg(ee_tip r=20mm)와 1mm 여유 → 정렬 통과/오정렬 접촉.
+                 각 기둥 축은 삽입축(local Z)과 평행(euler 0 0 0, Z대칭이라 회전 불필요).
+                 contype/conaffinity=2 → 로봇 링크(=1)·바닥과 무충돌, 충전건 tip과만 감지.
+                 group=2 → 기본 렌더 숨김(디버그 시만 표시). rgba 반투명 파랑(디버깅용). -->
+            <geom name="port_rim_0" type="cylinder" size="0.007 0.005" pos="0.028 -0.02 0"        euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+            <geom name="port_rim_1" type="cylinder" size="0.007 0.005" pos="0.019799 -0.000201 0"  euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+            <geom name="port_rim_2" type="cylinder" size="0.007 0.005" pos="0 0.008 0"             euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+            <geom name="port_rim_3" type="cylinder" size="0.007 0.005" pos="-0.019799 -0.000201 0" euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+            <geom name="port_rim_4" type="cylinder" size="0.007 0.005" pos="-0.028 -0.02 0"        euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+            <geom name="port_rim_5" type="cylinder" size="0.007 0.005" pos="-0.019799 -0.039799 0" euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+            <geom name="port_rim_6" type="cylinder" size="0.007 0.005" pos="0 -0.048 0"            euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+            <geom name="port_rim_7" type="cylinder" size="0.007 0.005" pos="0.019799 -0.039799 0"  euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+
             <!-- 소켓 입구(커넥터 돌출부 앞면) 중심. Port.obj 실측: 결합면 Z≈0 (mesh AABB Z [-0.115, +0.0087]).
                  alpha=0: 렌더 시 숨김(IK/타겟은 site pos 사용, 무관) -->
             <site name="charge_port_center"

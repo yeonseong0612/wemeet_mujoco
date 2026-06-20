@@ -1,1 +1,0 @@
-# wemeet_mujoco

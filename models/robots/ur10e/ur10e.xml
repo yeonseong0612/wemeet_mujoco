@@ -135,6 +135,19 @@
                       contype="0"
                       conaffinity="0"
                       group="2"/>
+                    <!-- [Col-3] 충전건 tip collision geom — 충전구 소켓(port_socket_rim)과만 충돌.
+                         size r=2.0cm(plug 실효반지름 21mm 내접), 반길이 1.5cm(총 3cm). pos=charger_tip_site.
+                         euler=1.5708 → cylinder 축을 custom_ee +Y(총신/삽입 방향)에 정렬.
+                         contype/conaffinity=2, group=2 (디버그 렌더). rgba 반투명 주황(디버깅용). -->
+                    <geom
+                      name="ee_tip_collision"
+                      type="cylinder"
+                      size="0.020 0.015"
+                      pos="0 0.2041 0.012"
+                      euler="1.5708 0 0"
+                      contype="2" conaffinity="2"
+                      group="2"
+                      rgba="1 0.3 0 0.3"/>
                     <!-- 충전건 커넥터 결합면 중심 (EE.obj Ymax 캡, 메시 분석으로 산출, custom_ee 프레임).
                          커넥터 면 법선 = custom_ee +Y. xyaxes: 로컬 +X = 결합/삽입 forward(+Y), +Z = up.
                          → IK pose 타겟이 커넥터 축을 충전구 삽입축에 정렬한다. -->
