@@ -35,7 +35,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 XML_PATH   = os.path.join(PROJECT_ROOT, "models", "scene.xml")
-MESH_PATH  = os.path.join(PROJECT_ROOT, "models", "assets", "Port.obj")
+MESH_PATH  = os.path.join(PROJECT_ROOT, "models", "assets", "hummer_charge_port.obj")
 FP_DIR     = os.path.join(PROJECT_ROOT, "ext", "FoundationPose")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "outputs")
 JSON_OUT   = os.path.join(OUTPUT_DIR, "integrated_eval.json")
@@ -44,6 +44,7 @@ PNG_OUT    = os.path.join(OUTPUT_DIR, "integrated_eval.png")
 CAM_NAME   = "cam_port"
 PORT_GEOM  = "charge_port_visual"
 PORT_BODY  = "charge_port_frame"
+PORT_PARENT_BODY = "hummer_vehicle"  # charge_port_frame 의 부모 — body_pos/quat 대입 시 world→parent-local 변환 필요
 EE_SITE    = "charger_tip_site"      # IK 대상 = 충전건 tip (custom_ee 프레임 +Y 0.204m 돌출)
 TARGET_SITES = ["charge_port_approach", "charge_port_insert"]
 OBS_SITE   = "charge_port_approach"  # eye-in-hand 관찰 pose: tip 을 여기 두고 카메라로 포트 관측
@@ -57,17 +58,20 @@ R_TIP_IN_OBJ = np.array([[0.0, -1.0, 0.0],
 JOINT_NAMES = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
                "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
 
-MESH_SCALE = 0.001
+MESH_SCALE = 1.0   # hummer_charge_port.obj 는 이미 미터 단위로 export됨 (Port.obj의 mm 스케일 0.001 아님)
 IMG_W, IMG_H = 640, 480                 # 기본(cam_port) 렌더 해상도
 # 카메라별 렌더 해상도. cam_eih 는 Intel RealSense D435 네이티브(848x480).
 CAM_RES = {"cam_port": (640, 480), "cam_eih": (848, 480)}
 EST_REFINE_ITER = 5
 
-# 랜덤화: 로봇 앞 도달가능 영역 (검증된 nominal (0,0.8,0.6) 주변)
-POS_LO = np.array([-0.20, 0.70, 0.50])
-POS_HI = np.array([ 0.20, 0.95, 0.70])
+# 랜덤화: 로봇 앞 도달가능 영역 (검증된 nominal world (0, 0.75, 1.1736) 주변 — hummer_vehicle 충전구 위치)
+POS_LO = np.array([-0.20, 0.65, 1.0736])
+POS_HI = np.array([ 0.20, 0.90, 1.2736])
 MAX_TILT_DEG = 10.0          # 실차 기본자세에서 ±각도 섭동
-MIN_MASK_PX = 800            # 포트 가시성 하한
+# 가시성 하한: Hummer 차체에 매립된 충전구는 tilt/위치에 따라 차체 패널에 가려 cam_eih 프레임에서
+# 사라질 수 있다(observation-pose IK 는 수렴해도 시선이 차체를 긁음). 30000px(848x480 의 ~7%)
+# 이상만 채택해 "정면에 가까운 깨끗한 관측"만 평가에 사용한다(empirical sweep: 양호뷰 65~72k, 불량뷰 <20k).
+MIN_MASK_PX = 30000
 REACH_TOL = 2e-3             # insert 도달성 IK 허용오차 (m)
 MAX_SAMPLE_TRIES = 400
 
@@ -176,9 +180,15 @@ def mat_to_quat(R):
     return q                          # (w, x, y, z)
 
 
-# 실차 장착 nominal: 소켓면 object +Z→world -Y(로봇쪽), AC위 object +Y→world +Z
-# = 90° about world X (scene.xml charge_port_frame quat 과 동일)
-R_NOMINAL = np.array([[1.0, 0, 0], [0, 0, -1.0], [0, 1.0, 0]])
+def quat_to_mat(q):
+    R = np.zeros(9)
+    mujoco.mju_quat2Mat(R, q)
+    return R.reshape(3, 3)
+
+
+# R_NOMINAL(실차 장착 nominal 자세)은 더 이상 하드코딩하지 않는다 — charge_port_frame 이
+# hummer_vehicle 아래 nested 되어 world 자세가 두 quat 의 합성이므로, main() 에서
+# 초기 mj_forward 직후 data.xmat[ids["body"]] 로 동적으로 읽어 ids["R_nominal"] 에 저장한다.
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +213,18 @@ def render_rgbd_mask(renderer, model, data, cam_id, geom_id):
     return rgb, depth, mask
 
 
-def set_port_pose(model, data, body_id, pos, quat):
-    model.body_pos[body_id] = pos
-    model.body_quat[body_id] = quat
+def set_port_pose(model, data, body_id, pos, quat, R_parent, p_parent):
+    """world-frame (pos, quat) 을 부모 body(PORT_PARENT_BODY) 기준 로컬 좌표로 변환해 대입.
+
+    body_pos/body_quat 는 MuJoCo 컴파일 모델에서 항상 '부모 body 프레임' 기준이다(world 기준 아님).
+    charge_port_frame 의 부모가 hummer_vehicle(고정 body, pos/quat 상수)이므로
+    world→local 변환: R_local = R_parent^T @ R_world,  p_local = R_parent^T @ (p_world - p_parent).
+    """
+    R_world = quat_to_mat(quat)
+    R_local = R_parent.T @ R_world
+    p_local = R_parent.T @ (pos - p_parent)
+    model.body_pos[body_id] = p_local
+    model.body_quat[body_id] = mat_to_quat(R_local)
     mujoco.mj_forward(model, data)
 
 
@@ -259,10 +278,10 @@ def sample_reachable_pose(model, data, renderer, ids, rng):
         axis = rng.normal(size=3)
         axis /= (np.linalg.norm(axis) + 1e-12)
         ang = rng.uniform(0, np.deg2rad(MAX_TILT_DEG))
-        R = rotvec_to_R(axis * ang) @ R_NOMINAL
+        R = rotvec_to_R(axis * ang) @ ids["R_nominal"]
         quat = mat_to_quat(R)
 
-        set_port_pose(model, data, ids["body"], pos, quat)
+        set_port_pose(model, data, ids["body"], pos, quat, ids["R_parent"], ids["p_parent"])
 
         # 가시성: 실제 캡처와 동일한 로봇 자세(eye-in-hand=관찰 pose / 고정=home)에서 판정
         position_for_capture(model, data, ids)
@@ -277,7 +296,7 @@ def sample_reachable_pose(model, data, renderer, ids, rng):
                                      ids["joints"], max_iters=400, verbose=False)
         reset_robot(model, data)
         if pe is not None and pe < REACH_TOL:
-            set_port_pose(model, data, ids["body"], pos, quat)
+            set_port_pose(model, data, ids["body"], pos, quat, ids["R_parent"], ids["p_parent"])
             return pos.copy(), quat.copy()
     raise RuntimeError("도달가능/가시 포즈 샘플 실패 — 범위(POS_LO/HI) 확인 필요")
 
@@ -446,7 +465,7 @@ def run_gui(model, data, ids, est, K, site_offsets, renderer, pose):
     import mujoco.viewer
 
     pos, quat = pose
-    set_port_pose(model, data, ids["body"], pos, quat)
+    set_port_pose(model, data, ids["body"], pos, quat, ids["R_parent"], ids["p_parent"])
     # 렌더 직전 캡처 자세 배치 후, 그 자세에서 카메라 pose 를 동적 스냅샷 (eye-in-hand 정합).
     position_for_capture(model, data, ids)
     rgb, depth, mask = render_rgbd_mask(renderer, model, data, ids["cam"], ids["geom"])
@@ -522,6 +541,9 @@ def main():
     model.vis.global_.offheight = max(model.vis.global_.offheight, img_h)
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model, height=img_h, width=img_w)
+    # 컴파일된 기본 상태(qpos=0, scene.xml 원본 body_pos/quat)로 한 번 forward —
+    # hummer_vehicle/charge_port_frame 의 nominal world pose 를 randomize 전에 캡처한다.
+    mujoco.mj_forward(model, data)
 
     ids = {
         "cam": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, args.camera),
@@ -536,6 +558,12 @@ def main():
     ids["noise"] = args.noise
     # eye-in-hand 여부: 카메라가 worldbody(고정) 가 아니라 로봇 body 에 장착됐는지로 판정.
     ids["eye_in_hand"] = bool(model.cam_bodyid[ids["cam"]] != 0)
+    # charge_port_frame 의 부모(hummer_vehicle)는 정적 body(고정 pos/quat) — 한 번만 캡처해 재사용.
+    ids["parent_body"] = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, PORT_PARENT_BODY)
+    ids["R_parent"] = data.xmat[ids["parent_body"]].reshape(3, 3).copy()
+    ids["p_parent"] = data.xpos[ids["parent_body"]].copy()
+    # 실차 장착 nominal world 자세 — scene.xml 컴파일 기본값에서 동적으로 읽음(하드코딩 금지).
+    ids["R_nominal"] = data.xmat[ids["body"]].reshape(3, 3).copy()
     site_offsets = {s: target_in_obj(model, ids["targets"][s]) for s in TARGET_SITES}
     K = intrinsics_from_fovy(model, ids["cam"], img_w, img_h)
     print(f"[INFO] camera={args.camera}  eye_in_hand={ids['eye_in_hand']}  "
@@ -552,7 +580,7 @@ def main():
     # 3) sweep 평가
     records = []
     for i, (pos, quat) in enumerate(poses):
-        set_port_pose(model, data, ids["body"], pos, quat)
+        set_port_pose(model, data, ids["body"], pos, quat, ids["R_parent"], ids["p_parent"])
         rec = evaluate_pose(model, data, renderer, ids, est, K, site_offsets)
         records.append(rec)
         t = rec["targets"]["charge_port_insert"]

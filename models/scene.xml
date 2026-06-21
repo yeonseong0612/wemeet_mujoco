@@ -8,8 +8,9 @@
     <include file="robots/ur10e/ur10e.xml"/>
 
     <asset>
-        <!-- Port.obj is modelled in millimetres → scale to metres -->
-        <mesh name="charge_port_mesh" file="Port.obj" scale="0.001 0.001 0.001"/>
+        <!-- Hummer EV 차체 외장 + 실측 충전구(inlet) mesh — 미터 단위로 export됨 -->
+        <mesh name="hummer_body_mesh" file="hummer_body.obj" scale="1 1 1"/>
+        <mesh name="hummer_charge_port_mesh" file="hummer_charge_port.obj" scale="1 1 1"/>
     </asset>
 
     <visual>
@@ -36,71 +37,90 @@
             size="5 5 0.1"
             rgba="0.5 0 0.8 1"/>
 
-        <!-- Charging-port target (FoundationPose 6DoF estimation 대상) -->
-        <!-- 로봇 앞(+Y) 0.8 m. 실제 소켓 결합면(2구멍 커넥터)은 mesh object +Z 쪽(Port.obj 실제 확인).
-             quat=(0.7071,0.7071,0,0) = 90° about world X: 소켓면 object +Z -> world -Y(로봇쪽),
-             AC 상단 object +Y -> world +Z(위) = 로봇이 정면에서 결합하는 장착 자세 -->
-        <body name="charge_port_frame" pos="0 0.8 0.6" quat="0.70710678 0.70710678 0 0">
+        <!-- UR10e 받침대(pedestal) — 충전구 실측 높이 1.17m에 맞춰 base를 +0.45m 들어올림(ur10e.xml).
+             여기 cylinder는 그 오프셋을 시각적으로 채우는 받침대 모델(순수 시각, 충돌 무관). -->
+        <geom name="robot_pedestal"
+              type="cylinder"
+              size="0.15 0.225"
+              pos="0 0 0.225"
+              contype="0"
+              conaffinity="0"
+              rgba="0.35 0.35 0.38 1"/>
 
-
-            <geom name="charge_port_visual"
+        <!-- Hummer EV 차체 — 충전구는 차체에 실측 결합된 위치/자세 그대로(hummer_charge_port.obj 정렬 검증 완료).
+             quat은 world Z축 yaw만 적용(wheels-on-floor, z=0). -->
+        <body name="hummer_vehicle" pos="1.25435 2.35061 0" quat="0.077228 0 0 0.997013">
+            <geom name="hummer_body_visual"
                   type="mesh"
-                  mesh="charge_port_mesh"
-                  pos="0 0 0"
-                  euler="0 0 0"
+                  mesh="hummer_body_mesh"
                   contype="0"
                   conaffinity="0"
-                  rgba="0.2 0.2 0.2 1"/>
+                  rgba="0.85 0.85 0.85 1"/>
 
-            <!-- [Col-2] 소켓 입구 테두리 collision — 8개 cylinder 기둥 고리(crown)로 근사.
-                 입구평면(Port local X-Y, z=0)의 반지름 0.028m 원주에 45°씩 균등 배치.
-                 중심 charge_port_center=(0,-0.02,0) → y=-0.02+0.028·sinθ, x=0.028·cosθ.
-                 입구 안쪽 반지름 = 28-7 = 21mm, peg(ee_tip r=20mm)와 1mm 여유 → 정렬 통과/오정렬 접촉.
-                 각 기둥 축은 삽입축(local Z)과 평행(euler 0 0 0, Z대칭이라 회전 불필요).
-                 contype/conaffinity=2 → 로봇 링크(=1)·바닥과 무충돌, 충전건 tip과만 감지.
-                 group=2 → 기본 렌더 숨김(디버그 시만 표시). rgba 반투명 파랑(디버깅용). -->
-            <geom name="port_rim_0" type="cylinder" size="0.007 0.005" pos="0.028 -0.02 0"        euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
-            <geom name="port_rim_1" type="cylinder" size="0.007 0.005" pos="0.019799 -0.000201 0"  euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
-            <geom name="port_rim_2" type="cylinder" size="0.007 0.005" pos="0 0.008 0"             euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
-            <geom name="port_rim_3" type="cylinder" size="0.007 0.005" pos="-0.019799 -0.000201 0" euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
-            <geom name="port_rim_4" type="cylinder" size="0.007 0.005" pos="-0.028 -0.02 0"        euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
-            <geom name="port_rim_5" type="cylinder" size="0.007 0.005" pos="-0.019799 -0.039799 0" euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
-            <geom name="port_rim_6" type="cylinder" size="0.007 0.005" pos="0 -0.048 0"            euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
-            <geom name="port_rim_7" type="cylinder" size="0.007 0.005" pos="0.019799 -0.039799 0"  euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+            <!-- Charging-port target (FoundationPose 6DoF estimation 대상).
+                 pos/quat: 차체 로컬에서 export된 충전구 중심·자세(hummer_charge_port.obj 원점=입구 중심) -->
+            <body name="charge_port_frame" pos="0.9544 2.0217 1.1736" quat="0.708237 -0.697553 -0.108717 0">
 
-            <!-- 소켓 입구(커넥터 돌출부 앞면) 중심. Port.obj 실측: 결합면 Z≈0 (mesh AABB Z [-0.115, +0.0087]).
-                 alpha=0: 렌더 시 숨김(IK/타겟은 site pos 사용, 무관) -->
-            <site name="charge_port_center"
-                  pos="0 -0.02 0"
-                  size="0.025"
-                  rgba="0 1 0 0"/>
-            <!-- 삽입축 기준점: 소켓 안쪽(-Z) 0.10 m. alpha=0: 렌더 시 숨김 -->
-            <site name="charge_port_axis_site"
-                  pos="0 -0.02 -0.10"
-                  size="0.02"
-                  rgba="1 0 0 0"/>
-            <!-- 접근: 소켓 바깥(+Z) 0.15 m (로봇쪽). alpha=0: 렌더 시 숨김(IK/타겟은 site pos 사용, 무관) -->
-            <site name="charge_port_approach"
-                  pos="0 -0.02 0.15"
-                  size="0.025"
-                  rgba="1 0.6 0 0"/>
-            <!-- 삽입: 소켓 안쪽(-Z) 0.02 m (착좌). alpha=0: 렌더 시 숨김 -->
-            <site name="charge_port_insert"
-                  pos="0 -0.02 -0.02"
-                  size="0.02"
-                  rgba="0 0 1 0"/>
+                <geom name="charge_port_visual"
+                      type="mesh"
+                      mesh="hummer_charge_port_mesh"
+                      pos="0 0 0"
+                      euler="0 0 0"
+                      contype="0"
+                      conaffinity="0"
+                      rgba="0.2 0.2 0.2 1"/>
+
+                <!-- [Col-2] 소켓 입구 테두리 collision — 8개 cylinder 기둥 고리(crown)로 근사.
+                     입구평면(local X-Y, z=0)의 반지름 0.028m 원주에 45°씩 균등 배치.
+                     중심 charge_port_center=(0,0,0)(새 mesh 원점=입구 중심) → y=0.028·sinθ, x=0.028·cosθ.
+                     입구 안쪽 반지름 = 28-7 = 21mm, peg(ee_tip r=20mm)와 1mm 여유 → 정렬 통과/오정렬 접촉.
+                     각 기둥 축은 삽입축(local Z)과 평행(euler 0 0 0, Z대칭이라 회전 불필요).
+                     contype/conaffinity=2 → 로봇 링크(=1)·바닥과 무충돌, 충전건 tip과만 감지.
+                     group=2 → 기본 렌더 숨김(디버그 시만 표시). rgba 반투명 파랑(디버깅용). -->
+                <geom name="port_rim_0" type="cylinder" size="0.007 0.005" pos="0.028 0 0"         euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+                <geom name="port_rim_1" type="cylinder" size="0.007 0.005" pos="0.019799 0.019799 0" euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+                <geom name="port_rim_2" type="cylinder" size="0.007 0.005" pos="0 0.028 0"          euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+                <geom name="port_rim_3" type="cylinder" size="0.007 0.005" pos="-0.019799 0.019799 0" euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+                <geom name="port_rim_4" type="cylinder" size="0.007 0.005" pos="-0.028 0 0"         euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+                <geom name="port_rim_5" type="cylinder" size="0.007 0.005" pos="-0.019799 -0.019799 0" euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+                <geom name="port_rim_6" type="cylinder" size="0.007 0.005" pos="0 -0.028 0"         euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+                <geom name="port_rim_7" type="cylinder" size="0.007 0.005" pos="0.019799 -0.019799 0" euler="0 0 0" contype="2" conaffinity="2" group="2" rgba="0 0.5 1 0.3"/>
+
+                <!-- 소켓 입구(커넥터 돌출부 앞면) 중심. hummer_charge_port.obj 원점 = 입구 중심(export 시 정렬됨).
+                     alpha=0: 렌더 시 숨김(IK/타겟은 site pos 사용, 무관) -->
+                <site name="charge_port_center"
+                      pos="0 0 0"
+                      size="0.025"
+                      rgba="0 1 0 0"/>
+                <!-- 삽입축 기준점: 소켓 안쪽(-Z) 0.10 m. alpha=0: 렌더 시 숨김 -->
+                <site name="charge_port_axis_site"
+                      pos="0 0 -0.10"
+                      size="0.02"
+                      rgba="1 0 0 0"/>
+                <!-- 접근: 소켓 바깥(+Z) 0.15 m (로봇쪽). alpha=0: 렌더 시 숨김(IK/타겟은 site pos 사용, 무관) -->
+                <site name="charge_port_approach"
+                      pos="0 0 0.15"
+                      size="0.025"
+                      rgba="1 0.6 0 0"/>
+                <!-- 삽입: 소켓 안쪽(-Z) 0.02 m (착좌). alpha=0: 렌더 시 숨김 -->
+                <site name="charge_port_insert"
+                      pos="0 0 -0.02"
+                      size="0.02"
+                      rgba="0 0 1 0"/>
+            </body>
         </body>
 
         <camera
             name="overview_camera"
-            pos="2 -3 2"
-            euler="1.0472 0 0.6109"
-            fovy="45"/>  <!-- 60 0 35 deg ->
+            pos="2.4 -1.6 2.1"
+            xyaxes="0.7507 0.6606 0  -0.2402 0.2730 0.9315"
+            fovy="50"/>
 
-        <!-- Dedicated RGB-D camera facing the port head-on (FoundationPose 입력용) -->
+        <!-- Dedicated RGB-D camera facing the port head-on (FoundationPose 입력용).
+             charge_port_frame world pos (0, 0.75, 1.1736) 기준 -Y 1.0m, 동일 높이 유지 -->
         <camera
             name="cam_port"
-            pos="0 -0.2 0.6"
+            pos="0 -0.25 1.1736"
             xyaxes="1 0 0  0 0 1"
             fovy="45"/>
 

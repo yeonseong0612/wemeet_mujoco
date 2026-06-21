@@ -25,14 +25,14 @@ import mujoco
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 XML_PATH     = os.path.join(PROJECT_ROOT, "models", "scene.xml")
-MESH_PATH    = os.path.join(PROJECT_ROOT, "models", "assets", "Port.obj")
+MESH_PATH    = os.path.join(PROJECT_ROOT, "models", "assets", "hummer_charge_port.obj")
 FP_DIR       = os.path.join(PROJECT_ROOT, "ext", "FoundationPose")
 OUTPUT_DIR   = os.path.join(PROJECT_ROOT, "outputs")
 
 CAM_NAME      = "cam_port"
 PORT_GEOM     = "charge_port_visual"
 PORT_BODY     = "charge_port_frame"
-MESH_SCALE    = 0.001          # Port.obj: mm → m (scene.xml 의 mesh scale 과 일치)
+MESH_SCALE    = 1.0            # hummer_charge_port.obj: 이미 m 단위로 export (scene.xml 의 mesh scale 과 일치)
 IMG_W, IMG_H  = 640, 480
 EST_REFINE_ITER = 5
 

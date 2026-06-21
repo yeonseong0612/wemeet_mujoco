@@ -192,6 +192,11 @@ def main():
     ids["obs"] = model.site(pipe.OBS_SITE).id
     ids["noise"] = "none"
     ids["eye_in_hand"] = bool(model.cam_bodyid[ids["cam"]] != 0)
+    mujoco.mj_forward(model, data)
+    ids["parent_body"] = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, pipe.PORT_PARENT_BODY)
+    ids["R_parent"] = data.xmat[ids["parent_body"]].reshape(3, 3).copy()
+    ids["p_parent"] = data.xpos[ids["parent_body"]].copy()
+    ids["R_nominal"] = data.xmat[ids["body"]].reshape(3, 3).copy()
 
     tip_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, TIP_GEOM)
     rim_ids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, n) for n in RIM_GEOMS]
@@ -211,9 +216,16 @@ def main():
     print(f"[INFO] camera={CAMERA} tip_geom_id={tip_id} rim_geom_ids={rim_ids}")
 
     # 1) 고정 충전구 포즈 1개 (도달가능 + 가시) 샘플 — 4 케이스 공통.
+    # cam_port는 고정 외부 와이드뷰라 가시 mask가 cam_eih 기준 30000px에 못 미침
+    # (실측 0~5000px) — 이 스크립트(cam_port 전용)에서만 원래 임계값(800px)로 낮춤.
     print("[INFO] 도달가능/가시 충전구 포즈 샘플 ...")
-    pos, quat = pipe.sample_reachable_pose(model, data, renderer, ids, rng)
-    pipe.set_port_pose(model, data, ids["body"], pos, quat)
+    _orig_min_mask_px = pipe.MIN_MASK_PX
+    pipe.MIN_MASK_PX = 800
+    try:
+        pos, quat = pipe.sample_reachable_pose(model, data, renderer, ids, rng)
+    finally:
+        pipe.MIN_MASK_PX = _orig_min_mask_px
+    pipe.set_port_pose(model, data, ids["body"], pos, quat, ids["R_parent"], ids["p_parent"])
 
     # GT 기준값: approach(삽입 시작)·insert(착지) world 위치와 정렬 자세.
     R_world_obj = data.xmat[ids["body"]].reshape(3, 3).copy()
